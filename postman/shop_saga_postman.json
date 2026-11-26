@@ -1,0 +1,194 @@
+{
+  "info": {
+    "name": "Shop Saga Distributed Transactions",
+    "schema": "https://getpostman.com"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://arch.homework",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Setup Initial Data (Billing, Warehouse, Delivery)",
+      "item": [
+        {
+          "name": "Set User Balance (500)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/billing/deposit?user_id=test_user&amount=500"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Balance is 500\", () => pm.expect(pm.response.json().balance).to.eql(500));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Warehouse Stock (2 items)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/warehouse/stock?item_id=laptop&quantity=2"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Set Available Slot (slot_ok)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/delivery/slots?slot_id=slot_ok&available=true"
+          }
+        },
+        {
+          "name": "Set Busy Slot (slot_busy)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/delivery/slots?slot_id=slot_busy&available=false"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Happy Path - Successful Order",
+      "item": [
+        {
+          "name": "Create Valid Order",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"test_user\",\n  \"item_id\": \"laptop\",\n  \"quantity\": 1,\n  \"amount\": 200,\n  \"slot_id\": \"slot_ok\"\n}"
+            },
+            "url": "{{baseUrl}}/order/orders"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Order completed\", () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.eql(\"COMPLETED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Balance Decreased (300)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/billing/balance/test_user"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Balance is 300\", () => pm.expect(pm.response.json().balance).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Stock Decreased (1)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/warehouse/stock/laptop"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Stock is 1\", () => pm.expect(pm.response.json().quantity).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Rollback Path - Delivery Fails (Compensate Warehouse & Billing)",
+      "item": [
+        {
+          "name": "Create Order with Busy Slot (Should Fail & Rollback)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"test_user\",\n  \"item_id\": \"laptop\",\n  \"quantity\": 1,\n  \"amount\": 200,\n  \"slot_id\": \"slot_busy\"\n}"
+            },
+            "url": "{{baseUrl}}/order/orders"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Order failed with 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Balance Rolled Back (Still 300)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/billing/balance/test_user"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Balance refunded to 300\", () => pm.expect(pm.response.json().balance).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Stock Rolled Back (Still 1)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/warehouse/stock/laptop"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Stock released back to 1\", () => pm.expect(pm.response.json().quantity).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
